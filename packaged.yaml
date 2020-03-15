@@ -1,0 +1,213 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'process_contact_change
+
+  SAM Template for process_contact_change to interact with DynamoDB contact table
+  events.
+
+  '
+Globals:
+  Function:
+    Timeout: 5
+Parameters:
+  Table:
+    Default: contacts2
+    Type: String
+  RoleName:
+    Default: APIGateway-to-DynamoDB
+    Type: String
+Resources:
+  ProcessContactChange:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: s3://dschultz-lambda-deploy/d0d43b102750d97311ea14b6bbfa78f0
+      Handler: app.lambda_handler
+      Runtime: python3.7
+      Events:
+        DynamoDBEvent:
+          Type: DynamoDB
+          Properties:
+            Stream:
+              Fn::GetAtt:
+              - DynamoDBTable
+              - StreamArn
+            StartingPosition: TRIM_HORIZON
+            BatchSize: 10
+  DynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName:
+        Ref: Table
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      ProvisionedThroughput:
+        WriteCapacityUnits: 2
+        ReadCapacityUnits: 2
+      AttributeDefinitions:
+      - AttributeName: contact_id
+        AttributeType: S
+      - AttributeName: primary_contact_method
+        AttributeType: S
+      GlobalSecondaryIndexes:
+      - IndexName: primary_contact_method-index
+        KeySchema:
+        - KeyType: HASH
+          AttributeName: primary_contact_method
+        Projection:
+          ProjectionType: ALL
+        ProvisionedThroughput:
+          WriteCapacityUnits: 2
+          ReadCapacityUnits: 2
+      KeySchema:
+      - KeyType: HASH
+        AttributeName: contact_id
+  ContactsAPI:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      DefinitionBody:
+        swagger: 2.0
+        info:
+          title:
+            Ref: AWS::StackName
+        paths:
+          /contacts:
+            put:
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              responses:
+                '200':
+                  description: 200 response
+                  schema:
+                    $ref: '#/definitions/Empty'
+              x-amazon-apigateway-integration:
+                httpMethod: POST
+                type: AWS
+                uri:
+                  Fn::Sub: arn:aws:apigateway:${AWS::Region}:dynamodb:action/PutItem
+                credentials:
+                  Fn::Sub: arn:aws:iam::037760764470:role/${RoleName}
+                requestTemplates:
+                  application/json:
+                    Fn::Sub: "{ \n\t\"TableName\": \"${Table}\",\n\t\"Item\": {\n\t\
+                      \t\"contact_id\": {\n\t\t\t\"S\": \"$input.path('$.contact_id')\"\
+                      \n\t\t},\n\t\t\"primary_contact_method\": {\n\t\t\t\"S\": \"\
+                      $input.path('$.primary_contact_method')\"\n\t\t},\n\t\t\"first_name\"\
+                      : {\n\t\t\t\"S\": \"$input.path('$.first_name')\"\n\t\t}\n \t\
+                      \t\"last_name\": {\n\t\t\t\"S\": \"$input.path('$.last_name')\"\
+                      \n\t\t}\n \t\t\"email\": {\n\t\t\t\"S\": \"$input.path('$.email')\"\
+                      \n\t\t}\n \t\t\"address\": {\n\t\t\t\"S\": \"$input.path('$.address')\"\
+                      \n\t\t}\n \t\t\"sms\": {\n\t\t\t\"S\": \"$input.path('$.sms')\"\
+                      \n\t\t}\n \t\t\"phone\": {\n\t\t\t\"S\": \"$input.path('$.phone')\"\
+                      \n\t\t}\n \t}\n}"
+                responses:
+                  default:
+                    statusCode: '200'
+          /contacts/{contact_id}:
+            get:
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              responses:
+                '200':
+                  description: 200 response
+                  schema:
+                    $ref: '#/definitions/Empty'
+              x-amazon-apigateway-integration:
+                httpMethod: POST
+                type: AWS
+                uri:
+                  Fn::Sub: arn:aws:apigateway:${AWS::Region}:dynamodb:action/Query
+                credentials:
+                  Fn::Sub: arn:aws:iam::037760764470:role/${RoleName}
+                requestTemplates:
+                  application/json:
+                    Fn::Sub: "{ \n\t\"TableName\": \"${Table}\",\n\t\"KeyConditionExpression\"\
+                      : \"contact_id = :v1\",\n\t\"ExpressionAttributeValues\": {\n\
+                      \t\t\":v1\": { \n\t\t\t\"S\": \"$input.params('contact_id')\"\
+                      \n\t\t}\n\t}\n}"
+                responses:
+                  default:
+                    statusCode: '200'
+                    responseTemplates:
+                      application/json: "#set($inputRoot = $input.path('$'))\n{\n\t\
+                        \"comments\": [\n\t\t#foreach($elem in $inputRoot.Items) {\n\
+                        \t\t\t\"contact_id\": \"$elem.contact_id.S\",\n\t\t\t\"primary_contact_method\"\
+                        : \"$elem.primary_contact_method.S\",\n\t\t\t\"first_name\"\
+                        : \"$elem.first_name.N\"\n\t\t\t\"last_name\": \"$elem.last_name.N\"\
+                        \n\t\t\t\"email\": \"$elem.email.N\"\n\t\t\t\"address\": \"\
+                        $elem.address.N\"\n\t\t\t\"phone\": \"$elem.phone.N\"\n\t\t\
+                        \t\"sms\": \"$elem.sms.N\"\n\t\t}#if($foreach.hasNext),#end\n\
+                        \t#end\n\t]\n}"
+            post:
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              responses:
+                '200':
+                  description: 200 response
+                  schema:
+                    $ref: '#/definitions/Empty'
+              x-amazon-apigateway-integration:
+                httpMethod: POST
+                type: AWS
+                uri:
+                  Fn::Sub: arn:aws:apigateway:${AWS::Region}:dynamodb:action/UpdateItem
+                credentials:
+                  Fn::Sub: arn:aws:iam::037760764470:role/${RoleName}
+                requestTemplates:
+                  application/json:
+                    Fn::Sub: "{\n\t\"TableName\": \"${Table}\",\n\t\"Key\":{\n \t\t\
+                      \"contact_id\": {\n \t\t\t\"S\": \"$input.path('$.contact_id')\"\
+                      \n\t\t}\n\t},\n\t\"ExpressionAttributeValues\": {\n\t\t\":primary_contact_method\"\
+                      : {\n\t\t\t\"N\": \"$input.path('$.primary_contact_method')\"\
+                      },\n\t\t\":first_name\": {\n\t\t\t\"S\": \"$input.path('$.first_name')\"\
+                      }\n\t\t\":last_name\": {\n\t\t\t\"S\": \"$input.path('$.last_name')\"\
+                      }\n\t\t\":email\": {\n\t\t\t\"S\": \"$input.path('$.email')\"\
+                      }\n\t\t\":address\": {\n\t\t\t\"S\": \"$input.path('$.address')\"\
+                      }\n\t\t\":phone\": {\n\t\t\t\"S\": \"$input.path('$.phone')\"\
+                      }\n\t\t\":sms\": {\n\t\t\t\"S\": \"$input.path('$.sms')\"}\n\
+                      \t},\n\t\"ReturnValues\": \"ALL_NEW\"\n}"
+                responses:
+                  default:
+                    statusCode: '200'
+            delete:
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - name: PageId
+                in: path
+                required: true
+                type: string
+              responses:
+                '200':
+                  description: 200 response
+                  schema:
+                    $ref: '#/definitions/Empty'
+              x-amazon-apigateway-integration:
+                credentials:
+                  Fn::Sub: arn:aws:iam::037760764470:role/${RoleName}
+                uri:
+                  Fn::Sub: arn:aws:apigateway:${AWS::Region}:dynamodb:action/DeleteItem
+                requestTemplates:
+                  application/json:
+                    Fn::Sub: "{ \n\t\"TableName\": \"${Table}\",\n\t\"Key\": {\n\t\
+                      \t\"contact_id\": {\n \t\t\t\"S\": \"$input.params('contact_id')\"\
+                      \n\t\t}\n\t},\n\t\"ConditionExpression\": \"attribute_not_exists(Replies)\"\
+                      ,\n\t\"ReturnValues\": \"ALL_OLD\"\n}"
+                responses:
+                  default:
+                    statusCode: '200'
+                passthroughBehavior: when_no_match
+                httpMethod: POST
+                type: aws
+            definitions:
+              Empty:
+                type: object
+                title: Empty Schema
